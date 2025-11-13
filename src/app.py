@@ -69,7 +69,7 @@ def get_ollama_response(prompt, data_summary):
             "stream": False
         }
 
-        response = requests.post(url, json=payload, timeout=300)
+        response = requests.post(url, json=payload, timeout=30000)
         response.raise_for_status()
 
         result = response.json()
@@ -104,7 +104,7 @@ def get_claude_response(prompt, data_summary):
             ]
         }
 
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, json=payload, timeout=30000)
         response.raise_for_status()
 
         result = response.json()
@@ -142,8 +142,58 @@ def create_data_summary(data):
 
     return summary
 
+# Function to create and save visualization
+def create_and_save_visualization(df, question):
+    """
+    Create a visualization based on the question and save it
+
+    Args:
+        df (pandas.DataFrame): The data to visualize
+        question (str): The question that triggered the visualization
+
+    Returns:
+        str: Path to the saved visualization file
+    """
+    try:
+        # Create a simple bar chart for demonstration
+        # In a real implementation, this would be more sophisticated
+        if len(df.columns) >= 2:
+            # Use first two columns for visualization
+            col1 = df.columns[0]
+            col2 = df.columns[1]
+
+            # Create a simple bar chart
+            fig = px.bar(df, x=col1, y=col2, title=f"データの可視化: {col1} vs {col2}")
+
+            # Save the visualization
+            folder_path = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+            os.makedirs(folder_path, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"visualization_{timestamp}.png"
+            file_path = os.path.join(folder_path, filename)
+
+            fig.write_image(file_path)
+
+            return file_path
+        else:
+            # If we don't have enough columns, create a simple histogram
+            fig = px.histogram(df, title="データの分布")
+            folder_path = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+            os.makedirs(folder_path, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"visualization_{timestamp}.png"
+            file_path = os.path.join(folder_path, filename)
+
+            fig.write_image(file_path)
+
+            return file_path
+
+    except Exception as e:
+        st.error(f"可視化作成エラー: {str(e)}")
+        return None
+
 # Function to save chat session
-def save_chat_session(messages):
+def save_chat_session(messages, data_file):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"chat_session_{timestamp}.md"
 
@@ -164,11 +214,13 @@ if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
         st.session_state.df = df
 
-        # Save uploaded file to disk
-        folder_path = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
-        os.makedirs(folder_path, exist_ok=True)
-        saved_file_path = save_file_with_timestamp(folder_path, uploaded_file.name, uploaded_file.getvalue())
-        st.info(f"ファイルが保存されました: {saved_file_path}")
+        # Save uploaded file to disk only once
+        if "saved_file_path" not in st.session_state:
+            folder_path = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+            os.makedirs(folder_path, exist_ok=True)
+            saved_file_path = save_file_with_timestamp(folder_path, uploaded_file.name, uploaded_file.getvalue())
+            st.session_state.saved_file_path = saved_file_path
+            st.info(f"ファイルが保存されました: {saved_file_path}")
 
         # Display file info
         st.subheader("ファイル情報")
@@ -221,7 +273,15 @@ if uploaded_file is not None:
                 # Create data summary for LLM
                 data_summary = create_data_summary(st.session_state.df)
                 response = get_llm_response(prompt, data_summary, st.session_state.model)
-                st.markdown(response)
+
+                # Create and save visualization if needed
+                visualization_path = create_and_save_visualization(st.session_state.df, prompt)
+                if visualization_path:
+                    # Add a link to the visualization in the response
+                    response_with_visualization = f"{response}\n\n![可視化結果]({visualization_path})"
+                    st.markdown(response_with_visualization)
+                else:
+                    st.markdown(response)
 
             # Add assistant response to chat history
             st.session_state.messages.append({"role": "assistant", "content": response})

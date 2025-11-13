@@ -9,3 +9,4 @@ scipy
 python-dotenv
 requests
 pytest
+kaleido
