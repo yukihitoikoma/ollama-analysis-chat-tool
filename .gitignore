@@ -1,0 +1,14 @@
+# speckit
+speckit.constitution
+speckit.specify
+.analysis_tool/
+
+# config
+.env
+
+# data
+data/
+docs/
+
+# test
+test_app.py
