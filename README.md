@@ -126,8 +126,6 @@ streamlit run src/app.py
 ├── docs/                        # ドキュメント
 ├── .env                         # 環境変数設定（要作成）
 ├── requirements.txt             # Python依存関係
-├── speckit.constitution         # コード品質ガイドライン
-├── speckit.specify             # アプリケーション仕様
 └── README.md                   # このファイル
 ```
 
@@ -203,16 +201,3 @@ streamlit run src/app.py
 - モジュラー設計
 
 詳細は`speckit.constitution`を参照してください。
-
-## ライセンス
-
-このプロジェクトはMITライセンスの下で提供されます。
-
-## 貢献
-
-バグ報告や機能リクエストはIssueで受け付けています。
-プルリクエストも歓迎します。
-
-## サポート
-
-質問や問題がある場合は、Issueを作成してください。
