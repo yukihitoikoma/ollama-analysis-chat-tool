@@ -10,3 +10,9 @@ python-dotenv
 requests
 pytest
 kaleido
+xgboost
+lightgbm
+optuna
+featuretools
+boruta
+tensorflow

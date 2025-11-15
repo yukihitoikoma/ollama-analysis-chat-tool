@@ -63,7 +63,7 @@ def save_file_with_timestamp(folder_path, filename, file_content):
 
 def save_chat_session(chat_history, data_file, save_directory="data"):
     """
-    Save chat session as markdown file
+    Save chat session as markdown file with image links
 
     Args:
         chat_history (list): List of chat messages
@@ -94,7 +94,10 @@ def save_chat_session(chat_history, data_file, save_directory="data"):
 
         for message in chat_history:
             role = "ユーザー" if message["role"] == "user" else "アシスタント"
-            markdown_content += f"**{role}**: {message['content']}\n\n"
+            content = message['content']
+
+            # Add message content (images links are preserved as-is)
+            markdown_content += f"**{role}**: {content}\n\n"
 
         # Save file
         with open(file_path, "w", encoding="utf-8") as f:
