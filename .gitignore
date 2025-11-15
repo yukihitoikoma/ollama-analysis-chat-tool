@@ -7,7 +7,7 @@ db.sqlite3
 # speckit
 speckit.constitution
 speckit.specify
-.analysis_tool/
+analysis_tool/
 
 # config
 .env
@@ -15,6 +15,7 @@ speckit.specify
 # data
 data/
 docs/
+models/
 
 # test
 test_app.py

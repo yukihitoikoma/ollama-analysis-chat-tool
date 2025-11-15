@@ -36,7 +36,8 @@ from utils.llm_handler import (
     create_data_summary,
     detect_analysis_request,
     format_analysis_response,
-    get_analysis_interpretation
+    get_analysis_interpretation,
+    get_required_graphs
 )
 
 # Import analysis utilities
@@ -226,12 +227,37 @@ def handle_chat_interaction(df, uploaded_file):
     st.subheader("チャットインターフェース")
 
     # チャットメッセージを表示
-    for message in st.session_state.messages:
+    for idx, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            # 画像がある場合は表示
+
+            # 単一の画像がある場合は表示（後方互換性）
             if "image" in message:
-                st.plotly_chart(message["image"], use_container_width=True)
+                st.plotly_chart(message["image"], use_container_width=True, key=f"chart_history_{idx}")
+            if "image_path" in message and message["image_path"]:
+                try:
+                    st.image(message["image_path"], caption="保存されたグラフ画像", use_container_width=True)
+                except Exception as img_error:
+                    logger.warning(f"保存画像の表示エラー: {str(img_error)}")
+
+            # 複数の画像がある場合は表示
+            if "images" in message and message["images"]:
+                st.markdown("---")
+                st.markdown("### 📊 生成されたグラフ")
+                for fig_idx, fig in enumerate(message["images"]):
+                    try:
+                        st.plotly_chart(fig, use_container_width=True, key=f"chart_history_{idx}_{fig_idx}")
+                    except Exception as e:
+                        logger.warning(f"履歴グラフ表示エラー: {str(e)}")
+
+                # 複数の保存画像パスがある場合
+                if "image_paths" in message and message["image_paths"]:
+                    for path_idx, img_path in enumerate(message["image_paths"]):
+                        try:
+                            if os.path.exists(img_path):
+                                st.image(img_path, caption=f"グラフ {path_idx + 1}", use_container_width=True)
+                        except Exception as e:
+                            logger.warning(f"履歴画像表示エラー: {str(e)}")
 
     # チャット入力
     if prompt := st.chat_input("データに関する質問を入力してください"):
@@ -398,69 +424,106 @@ def handle_chat_interaction(df, uploaded_file):
                             full_response += "### 📊 分析結果の解釈と提案\n\n"
                             full_response += interpretation
 
-                # 可視化を作成
-                fig = None
-                fig_path = None
+            # 応答を表示
+            st.markdown(full_response)
 
-                try:
-                    if (analysis_info["visualization"] or
-                        analysis_info["statistical_analysis"] or
-                        analysis_info["model_creation"]):
-                        # 可視化タイプを決定
-                        viz_type = analysis_info["visualization"] or "auto"
+            # メッセージをセッションに一旦保存（グラフなし）
+            message_data = {"role": "assistant", "content": full_response}
+            st.session_state.messages.append(message_data)
 
-                        # 特殊な可視化タイプ
-                        if analysis_info["statistical_analysis"] == "linear_regression":
-                            viz_type = "regression"
-                        elif analysis_info["statistical_analysis"] == "clustering":
-                            viz_type = "clustering"
-                        elif (analysis_info["model_creation"] and
-                              "feature_importance" in analysis_results):
-                            viz_type = "feature_importance"
+            # グラフ生成フェーズ
+            generated_figures = []
+            generated_paths = []
 
-                        fig, fig_path = create_and_save_visualization(
-                            df,
-                            visualization_type=viz_type,
-                            analysis_results=analysis_results
-                        )
+            # LLMに必要なグラフのタイプを判断させる
+            required_graphs = get_required_graphs(
+                prompt,
+                data_summary,
+                full_response,
+                st.session_state.model
+            )
 
-                        if fig_path:
-                            logger.info(f"グラフ保存成功: {fig_path}")
-                        else:
-                            logger.warning("グラフの保存に失敗しました")
-                except Exception as viz_error:
-                    logger.error(f"可視化エラー: {str(viz_error)}")
-                    st.warning(
-                        "グラフの作成・保存中にエラーが発生しましたが、"
-                        "分析結果は表示されます"
-                    )
+            logger.info(f"生成するグラフ: {required_graphs if required_graphs else 'なし'}")
 
-                # 応答を表示
-                st.markdown(full_response)
+            # グラフが必要な場合のみ生成
+            if required_graphs:
+                with st.spinner("📊 グラフ作成中..."):
+                    # 各グラフタイプを生成
+                    for idx, viz_type in enumerate(required_graphs):
+                        try:
+                            logger.info(f"グラフ {idx + 1}/{len(required_graphs)}: {viz_type} を作成中")
 
-                # グラフを表示
-                if fig:
+                            # 特殊な可視化タイプの処理
+                            if viz_type == "regression" and analysis_info["statistical_analysis"] == "linear_regression":
+                                fig, fig_path = create_and_save_visualization(
+                                    df,
+                                    visualization_type="regression",
+                                    analysis_results=analysis_results
+                                )
+                            elif viz_type == "clustering" and "cluster_labels" in analysis_results:
+                                fig, fig_path = create_and_save_visualization(
+                                    df,
+                                    visualization_type="clustering",
+                                    analysis_results=analysis_results
+                                )
+                            elif viz_type == "feature_importance" and "feature_importance" in analysis_results:
+                                fig, fig_path = create_and_save_visualization(
+                                    df,
+                                    visualization_type="feature_importance",
+                                    analysis_results=analysis_results
+                                )
+                            else:
+                                # 通常の可視化
+                                fig, fig_path = create_and_save_visualization(
+                                    df,
+                                    visualization_type=viz_type,
+                                    analysis_results=analysis_results
+                                )
+
+                            if fig is not None:
+                                generated_figures.append(fig)
+                                if fig_path:
+                                    generated_paths.append(fig_path)
+                                    logger.info(f"グラフ保存成功: {fig_path}")
+                            else:
+                                logger.warning(f"グラフ作成失敗: {viz_type}")
+
+                        except Exception as viz_error:
+                            logger.error(f"グラフ作成エラー ({viz_type}): {str(viz_error)}")
+
+            # 生成されたグラフを表示
+            if generated_figures:
+                st.markdown("---")
+                st.markdown("### 📊 生成されたグラフ")
+
+                for idx, fig in enumerate(generated_figures):
                     try:
-                        st.plotly_chart(fig, use_container_width=True)
+                        chart_key = f"chart_generated_{len(st.session_state.messages)}_{idx}"
+                        st.plotly_chart(fig, use_container_width=True, key=chart_key)
+                        logger.info(f"グラフ {idx + 1} を表示しました")
 
-                        # 画像リンクを追加
-                        if fig_path:
-                            full_response += f"\n\n![可視化結果]({fig_path})"
+                        # 保存された画像も表示
+                        if idx < len(generated_paths) and generated_paths[idx]:
+                            if os.path.exists(generated_paths[idx]):
+                                st.image(
+                                    generated_paths[idx],
+                                    caption=f"グラフ {idx + 1}",
+                                    use_container_width=True
+                                )
                     except Exception as display_error:
                         logger.error(f"グラフ表示エラー: {str(display_error)}")
-                        st.error("グラフの表示に失敗しました")
 
-                # メッセージをセッションに保存
-                message_data = {"role": "assistant", "content": full_response}
-                if fig:
-                    message_data["image"] = fig
-                st.session_state.messages.append(message_data)
+            # メッセージデータを更新（グラフ情報を追加）
+            if generated_figures:
+                st.session_state.messages[-1]["images"] = generated_figures
+            if generated_paths:
+                st.session_state.messages[-1]["image_paths"] = generated_paths
 
-                # 可視化パスを追跡
-                if fig_path:
-                    if "visualizations" not in st.session_state:
-                        st.session_state.visualizations = []
-                    st.session_state.visualizations.append(fig_path)
+            # 可視化パスを追跡
+            if generated_paths:
+                if "visualizations" not in st.session_state:
+                    st.session_state.visualizations = []
+                st.session_state.visualizations.extend(generated_paths)
 
     # 保存ボタン
     if len(st.session_state.messages) > 0:

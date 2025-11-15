@@ -3,6 +3,7 @@ import logging
 from dotenv import load_dotenv
 import requests
 import json
+import re
 
 # Load environment variables
 load_dotenv()
@@ -10,6 +11,28 @@ load_dotenv()
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def remove_external_image_urls(text):
+    """
+    Remove external image URLs from text
+
+    Args:
+        text (str): Text containing potential image URLs
+
+    Returns:
+        str: Text with external image URLs removed
+    """
+    # Remove markdown image links with external URLs
+    # Pattern: ![alt text](http://... or https://...)
+    text = re.sub(r'!\[([^\]]*)\]\(https?://[^\)]+\)', '', text)
+
+    # Remove plain external image URLs
+    text = re.sub(r'https?://[^\s]+\.(png|jpg|jpeg|gif|svg)', '', text, flags=re.IGNORECASE)
+
+    # Clean up extra blank lines
+    text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+
+    return text.strip()
 
 def get_llm_response(prompt, data_summary, model_type="ollama"):
     """
@@ -25,11 +48,15 @@ def get_llm_response(prompt, data_summary, model_type="ollama"):
     """
     try:
         if model_type == "ollama":
-            return get_ollama_response(prompt, data_summary)
+            response = get_ollama_response(prompt, data_summary)
         elif model_type == "claude":
-            return get_claude_response(prompt, data_summary)
+            response = get_claude_response(prompt, data_summary)
         else:
             return "Unknown model type"
+
+        # 外部画像URLを削除
+        response = remove_external_image_urls(response)
+        return response
     except Exception as e:
         logger.error(f"Error getting LLM response: {str(e)}")
         return f"LLMエラー: {str(e)}"
@@ -54,7 +81,18 @@ def get_ollama_response(prompt, data_summary):
         url = f"http://{ollama_host}/api/generate"
 
         # Prepare the prompt
-        full_prompt = f"データの概要:\n{data_summary}\n\n質問:\n{prompt}\n\n回答:"
+        full_prompt = f"""データの概要:
+{data_summary}
+
+質問:
+{prompt}
+
+注意:
+- グラフや画像のURLリンク（imgur.comなど）を生成しないでください
+- グラフはシステムが自動的に生成します
+- テキストでの説明のみを提供してください
+
+回答:"""
 
         payload = {
             "model": ollama_model,
@@ -92,7 +130,18 @@ def get_claude_response(prompt, data_summary):
         url = "https://api.anthropic.com/v1/messages"
 
         # Prepare the prompt
-        full_prompt = f"データの概要:\n{data_summary}\n\n質問:\n{prompt}\n\n回答:"
+        full_prompt = f"""データの概要:
+{data_summary}
+
+質問:
+{prompt}
+
+注意:
+- グラフや画像のURLリンク（imgur.comなど）を生成しないでください
+- グラフはシステムが自動的に生成します
+- テキストでの説明のみを提供してください
+
+回答:"""
 
         headers = {
             "Content-Type": "application/json",
@@ -243,15 +292,24 @@ def get_analysis_interpretation(prompt, data_summary, analysis_text, model_type=
 分析結果:
 {analysis_text}
 
+注意:
+- グラフや画像のURLリンク（imgur.comなど）を生成しないでください
+- グラフはシステムが自動的に生成します
+- テキストでの説明のみを提供してください
+
 上記を踏まえて、分かりやすく簡潔に日本語で説明してください。"""
 
     try:
         if model_type == "ollama":
-            return get_ollama_interpretation(interpretation_prompt)
+            response = get_ollama_interpretation(interpretation_prompt)
         elif model_type == "claude":
-            return get_claude_interpretation(interpretation_prompt)
+            response = get_claude_interpretation(interpretation_prompt)
         else:
             return ""
+
+        # 外部画像URLを削除
+        response = remove_external_image_urls(response)
+        return response
     except Exception as e:
         logger.error(f"解釈取得エラー: {str(e)}")
         return ""
@@ -307,3 +365,72 @@ def get_claude_interpretation(prompt):
     except Exception as e:
         logger.error(f"Claude解釈取得エラー: {str(e)}")
         return ""
+
+
+def get_required_graphs(prompt, data_summary, response_text, model_type="ollama"):
+    """LLMの応答から必要なグラフのリストを取得する
+
+    Args:
+        prompt (str): ユーザーの質問
+        data_summary (str): データサマリー
+        response_text (str): LLMの応答テキスト
+        model_type (str): 使用するLLMのタイプ
+
+    Returns:
+        list: 必要なグラフのタイプリスト（例: ["correlation", "histogram"]）、不要な場合は空リスト
+    """
+    graph_prompt = f"""以下のユーザーの質問とその回答を分析し、グラフが必要かどうかを判断してください。
+
+ユーザーの質問:
+{prompt}
+
+回答:
+{response_text}
+
+指示:
+1. 回答の内容から、データ分析やグラフ表示が必要かどうかを判断してください
+2. 単なる質問応答やテキストのみで十分な場合は「none」と返してください
+3. グラフが必要な場合のみ、以下から適切なタイプを選んでカンマ区切りで返してください
+
+利用可能なグラフタイプ:
+- correlation: 相関ヒートマップ（変数間の関係を見る場合）
+- histogram: ヒストグラム（データの分布を見る場合）
+- scatter: 散布図（2変数の関係を見る場合）
+- bar: 棒グラフ（カテゴリ別の比較）
+- box: 箱ひげ図（分布の統計的比較）
+
+重要: 回答内容が数値分析や統計、データの傾向に言及していない場合は「none」と返してください。
+
+必要なグラフタイプのみを返してください（説明文は不要）:"""
+
+    try:
+        if model_type == "ollama":
+            response = get_ollama_response(graph_prompt, "")
+        elif model_type == "claude":
+            response = get_claude_response(graph_prompt, "")
+        else:
+            return []
+
+        # 応答からグラフタイプを抽出
+        response = response.strip().lower()
+
+        # "none"または"不要"が含まれている場合は空リストを返す
+        if "none" in response or "不要" in response or "なし" in response:
+            logger.info("グラフは不要と判断されました")
+            return []
+
+        # カンマまたは改行で分割
+        graph_types = [g.strip() for g in re.split(r'[,\n]', response) if g.strip()]
+        # 有効なグラフタイプのみをフィルタ
+        valid_types = ["correlation", "histogram", "scatter", "bar", "line", "box", "regression", "feature_importance", "clustering"]
+        filtered_types = [g for g in graph_types if g in valid_types]
+
+        # 重複を削除
+        filtered_types = list(dict.fromkeys(filtered_types))
+
+        logger.info(f"要求されたグラフタイプ: {filtered_types if filtered_types else '不要'}")
+        return filtered_types
+
+    except Exception as e:
+        logger.error(f"グラフタイプ取得エラー: {str(e)}")
+        return []  # エラー時は空リスト
