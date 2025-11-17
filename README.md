@@ -199,5 +199,3 @@ streamlit run src/app.py
 - 単一責任原則（SRP）
 - DRY原則（重複排除）
 - モジュラー設計
-
-詳細は`speckit.constitution`を参照してください。

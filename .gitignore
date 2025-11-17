@@ -15,7 +15,7 @@ analysis_tool/
 # data
 data/
 docs/
-models/
+/models/
 
 # test
 test_app.py
