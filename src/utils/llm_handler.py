@@ -308,6 +308,12 @@ def get_ollama_interpretation(prompt):
     """Ollamaから解釈を取得"""
     try:
         ollama_host = os.getenv('OLLAMA_HOST', '192.168.0.103:11434')
+        if not ollama_host.startswith(('http://', 'https://')):
+            # スキームがない場合はhttpを追加
+            ollama_url = f"http://{ollama_host}"
+        else:
+            # スキームがある場合はそのまま使用
+            ollama_url = ollama_host
         ollama_model = os.getenv('OLLAMA_MODEL', 'qwen3:30b')
         url = f"http://{ollama_host}/api/generate"
 
