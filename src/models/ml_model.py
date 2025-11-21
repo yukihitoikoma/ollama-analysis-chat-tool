@@ -77,12 +77,31 @@ def prepare_data_for_modeling(data, target_column=None):
             y = target_encoder.fit_transform(y.astype(str))
 
         # Handle missing values
-        X = X.fillna(X.mean())
-        y = y.fillna(y.mean())
+        # For numeric columns, fill with mean; for categorical, already encoded
+        numeric_cols = X.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            col_mean = X[col].mean()
+            if pd.isna(col_mean):  # If entire column is NaN, fill with 0
+                X[col] = X[col].fillna(0)
+            else:
+                X[col] = X[col].fillna(col_mean)
+
+        # Handle target variable
+        if isinstance(y, pd.Series):
+            if pd.api.types.is_numeric_dtype(y):
+                y_mean = y.mean()
+                if pd.isna(y_mean):
+                    y = y.fillna(0)
+                else:
+                    y = y.fillna(y_mean)
+            # Remove any remaining NaN rows
+            valid_mask = ~(X.isna().any(axis=1) | y.isna())
+            X = X[valid_mask]
+            y = y[valid_mask]
 
         # Convert to numpy arrays
         X = X.values
-        y = y.values
+        y = y.values if isinstance(y, pd.Series) else y
 
         # Scale features
         scaler = StandardScaler()
@@ -162,6 +181,19 @@ def create_advanced_ml_model(X, y, model_type="xgboost", target_encoder=None, fe
         tuple: (model, model_params, feature_importance, feature_names)
     """
     try:
+        # Check for NaN values and remove them
+        if isinstance(X, np.ndarray):
+            # Check for NaN in X and y
+            nan_mask = np.isnan(X).any(axis=1) | np.isnan(y)
+            if nan_mask.any():
+                logger.warning(f"Removing {nan_mask.sum()} rows with NaN values")
+                X = X[~nan_mask]
+                y = y[~nan_mask]
+
+        # Verify we still have data after cleaning
+        if len(X) == 0 or len(y) == 0:
+            raise ValueError("No valid data remaining after removing NaN values")
+
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -263,6 +295,18 @@ def perform_hyperparameter_tuning(X, y, model_type="xgboost", n_trials=20):
         dict: Best parameters and best score
     """
     try:
+        # Check for NaN values and remove them
+        if isinstance(X, np.ndarray):
+            nan_mask = np.isnan(X).any(axis=1) | np.isnan(y)
+            if nan_mask.any():
+                logger.warning(f"Removing {nan_mask.sum()} rows with NaN values in hyperparameter tuning")
+                X = X[~nan_mask]
+                y = y[~nan_mask]
+
+        # Verify we still have data
+        if len(X) == 0 or len(y) == 0:
+            raise ValueError("No valid data remaining after removing NaN values")
+
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -457,22 +501,48 @@ def perform_statistical_analysis(data, analysis_type, target_column=None):
                 le = LabelEncoder()
                 X[col] = le.fit_transform(X[col].astype(str))
 
+            # Handle missing values first (before target variable processing)
+            # For numeric columns
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                col_mean = X[col].mean()
+                if pd.isna(col_mean):
+                    X[col] = X[col].fillna(0)
+                else:
+                    X[col] = X[col].fillna(col_mean)
+
             # Handle target variable
             # Check if target is categorical (object type) or binary numeric
             if y.dtype == 'object':
+                # Remove NaN from target before encoding
+                valid_mask = ~(X.isna().any(axis=1) | y.isna())
+                X = X[valid_mask]
+                y = y[valid_mask]
                 target_encoder = LabelEncoder()
                 y = target_encoder.fit_transform(y.astype(str))
             elif y.dtype in [np.float64, np.float32, np.int64, np.int32]:
+                # Handle NaN in target
+                y_mean = y.mean()
+                if pd.isna(y_mean):
+                    results = {"error": "Target variable is entirely NaN. Cannot perform logistic regression."}
+                    return results
+                y = y.fillna(y_mean)
+
+                # Remove any remaining NaN rows
+                valid_mask = ~(X.isna().any(axis=1) | y.isna())
+                X = X[valid_mask]
+                y = y[valid_mask]
+
                 # If target is numeric, check if it's actually a classification problem
                 # by checking if it has only a few distinct values (e.g., 0 and 1)
-                unique_values = np.unique(y)
+                unique_values = y.dropna().unique()
                 # Check if all values are integers (for numeric classification)
-                if all(val == int(val) for val in unique_values):
+                if all(val == int(val) for val in unique_values if not pd.isna(val)):
                     # Convert to int for comparison
-                    unique_values = [int(val) for val in unique_values]
+                    unique_values = [int(val) for val in unique_values if not pd.isna(val)]
                     if len(unique_values) <= 10 and all(val in [0, 1] for val in unique_values):
                         # Treat as binary classification
-                        pass
+                        y = y.astype(int)
                     else:
                         # Treat as regression problem - cannot use logistic regression
                         results = {"error": "Logistic regression requires a binary target variable for classification, but the target is continuous."}
@@ -485,10 +555,6 @@ def perform_statistical_analysis(data, analysis_type, target_column=None):
                 # For other types, assume it's a regression problem
                 results = {"error": "Logistic regression requires a binary target variable for classification, but the target is continuous."}
                 return results
-
-            # Handle missing values
-            X = X.fillna(X.mean())
-            y = y.fillna(y.mean())
 
             # Split data
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -536,6 +602,16 @@ def perform_statistical_analysis(data, analysis_type, target_column=None):
                 le = LabelEncoder()
                 X[col] = le.fit_transform(X[col].astype(str))
 
+            # Handle missing values first
+            # For numeric columns
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                col_mean = X[col].mean()
+                if pd.isna(col_mean):
+                    X[col] = X[col].fillna(0)
+                else:
+                    X[col] = X[col].fillna(col_mean)
+
             # Handle target variable
             # Check if target is categorical (object type)
             if y.dtype == 'object':
@@ -544,15 +620,20 @@ def perform_statistical_analysis(data, analysis_type, target_column=None):
                 return results
             elif y.dtype in [np.float64, np.float32, np.int64, np.int32]:
                 # If target is numeric, it's suitable for linear regression
-                pass
+                y_mean = y.mean()
+                if pd.isna(y_mean):
+                    results = {"error": "Target variable is entirely NaN. Cannot perform linear regression."}
+                    return results
+                y = y.fillna(y_mean)
+
+                # Remove any remaining NaN rows
+                valid_mask = ~(X.isna().any(axis=1) | y.isna())
+                X = X[valid_mask]
+                y = y[valid_mask]
             else:
                 # For other types, we can't do linear regression
                 results = {"error": "Linear regression requires a continuous target variable, but the target is not numeric."}
                 return results
-
-            # Handle missing values
-            X = X.fillna(X.mean())
-            y = y.fillna(y.mean())
 
             # Split data
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -616,7 +697,15 @@ def perform_statistical_analysis(data, analysis_type, target_column=None):
                 results = {"error": "Not enough numeric columns for clustering analysis"}
             else:
                 # Handle missing values
-                numeric_data = numeric_data.fillna(numeric_data.mean())
+                for col in numeric_data.columns:
+                    col_mean = numeric_data[col].mean()
+                    if pd.isna(col_mean):
+                        numeric_data[col] = numeric_data[col].fillna(0)
+                    else:
+                        numeric_data[col] = numeric_data[col].fillna(col_mean)
+
+                # Remove rows with any remaining NaN
+                numeric_data = numeric_data.dropna()
 
                 # Standardize the data
                 scaler = StandardScaler()

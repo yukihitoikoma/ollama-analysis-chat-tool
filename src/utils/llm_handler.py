@@ -206,22 +206,11 @@ def detect_analysis_request(prompt):
         dict: 検出された分析タイプと詳細
     """
     analysis_info = {
-        "visualization": None,
         "statistical_analysis": None,
         "model_creation": False
     }
 
     prompt_lower = prompt.lower()
-
-    # グラフ/可視化の検出
-    if any(word in prompt_lower for word in ["散布図", "scatter", "scatterplot"]):
-        analysis_info["visualization"] = "scatter"
-    elif any(word in prompt_lower for word in ["相関", "correlation", "ヒートマップ", "heatmap"]):
-        analysis_info["visualization"] = "correlation"
-    elif any(word in prompt_lower for word in ["ヒストグラム", "histogram", "分布"]):
-        analysis_info["visualization"] = "histogram"
-    elif any(word in prompt_lower for word in ["グラフ", "可視化", "図", "chart", "plot", "visualize", "show"]):
-        analysis_info["visualization"] = "auto"
 
     # 統計分析の検出
     if any(word in prompt_lower for word in ["ロジスティック回帰", "logistic regression", "ロジスティック"]):
@@ -367,7 +356,7 @@ def get_claude_interpretation(prompt):
         return ""
 
 
-def get_required_graphs(prompt, data_summary, response_text, model_type="ollama"):
+def get_required_graphs(prompt, data_summary, response_text, model_type="ollama", already_planned_graphs=None):
     """LLMの応答から必要なグラフのリストを取得する
 
     Args:
@@ -375,10 +364,18 @@ def get_required_graphs(prompt, data_summary, response_text, model_type="ollama"
         data_summary (str): データサマリー
         response_text (str): LLMの応答テキスト
         model_type (str): 使用するLLMのタイプ
+        already_planned_graphs (list): 既に生成予定のグラフタイプのリスト
 
     Returns:
         list: 必要なグラフのタイプリスト（例: ["correlation", "histogram"]）、不要な場合は空リスト
     """
+    if already_planned_graphs is None:
+        already_planned_graphs = []
+    # 既に計画されているグラフがある場合は除外情報を追加
+    exclusion_text = ""
+    if already_planned_graphs:
+        exclusion_text = f"\n\n注意: 以下のグラフは既に生成予定です。これらを除外してください:\n- {', '.join(already_planned_graphs)}"
+
     graph_prompt = f"""以下のユーザーの質問とその回答を分析し、グラフが必要かどうかを判断してください。
 
 ユーザーの質問:
@@ -397,7 +394,7 @@ def get_required_graphs(prompt, data_summary, response_text, model_type="ollama"
 - histogram: ヒストグラム（データの分布を見る場合）
 - scatter: 散布図（2変数の関係を見る場合）
 - bar: 棒グラフ（カテゴリ別の比較）
-- box: 箱ひげ図（分布の統計的比較）
+- box: 箱ひげ図（分布の統計的比較）{exclusion_text}
 
 重要: 回答内容が数値分析や統計、データの傾向に言及していない場合は「none」と返してください。
 
@@ -425,10 +422,13 @@ def get_required_graphs(prompt, data_summary, response_text, model_type="ollama"
         valid_types = ["correlation", "histogram", "scatter", "bar", "line", "box", "regression", "feature_importance", "clustering"]
         filtered_types = [g for g in graph_types if g in valid_types]
 
+        # 既に計画されているグラフを除外
+        filtered_types = [g for g in filtered_types if g not in already_planned_graphs]
+
         # 重複を削除
         filtered_types = list(dict.fromkeys(filtered_types))
 
-        logger.info(f"要求されたグラフタイプ: {filtered_types if filtered_types else '不要'}")
+        logger.info(f"要求されたグラフタイプ（除外後）: {filtered_types if filtered_types else '不要'}")
         return filtered_types
 
     except Exception as e:

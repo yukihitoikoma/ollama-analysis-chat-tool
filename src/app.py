@@ -435,23 +435,39 @@ def handle_chat_interaction(df, uploaded_file):
             generated_figures = []
             generated_paths = []
 
-            # LLMに必要なグラフのタイプを判断させる
+            # 統計分析に基づいて必要なグラフを決定
+            predefined_graphs = set()
+            if analysis_info["statistical_analysis"] == "linear_regression":
+                predefined_graphs.add("regression")
+            elif analysis_info["statistical_analysis"] == "association_analysis":
+                predefined_graphs.add("correlation")
+            elif analysis_info["statistical_analysis"] == "clustering":
+                predefined_graphs.add("clustering")
+
+            if analysis_info["model_creation"] and "feature_importance" in analysis_results:
+                predefined_graphs.add("feature_importance")
+
+            # LLMに必要なグラフのタイプを判断させる（既に決定されたグラフは除外）
             required_graphs = get_required_graphs(
                 prompt,
                 data_summary,
                 full_response,
-                st.session_state.model
+                st.session_state.model,
+                already_planned_graphs=list(predefined_graphs)
             )
 
-            logger.info(f"生成するグラフ: {required_graphs if required_graphs else 'なし'}")
+            # 統計分析で決定されたグラフを優先的に追加
+            all_graphs = list(predefined_graphs) + [g for g in required_graphs if g not in predefined_graphs]
+
+            logger.info(f"生成するグラフ: {all_graphs if all_graphs else 'なし'}")
 
             # グラフが必要な場合のみ生成
-            if required_graphs:
+            if all_graphs:
                 with st.spinner("📊 グラフ作成中..."):
                     # 各グラフタイプを生成
-                    for idx, viz_type in enumerate(required_graphs):
+                    for idx, viz_type in enumerate(all_graphs):
                         try:
-                            logger.info(f"グラフ {idx + 1}/{len(required_graphs)}: {viz_type} を作成中")
+                            logger.info(f"グラフ {idx + 1}/{len(all_graphs)}: {viz_type} を作成中")
 
                             # 特殊な可視化タイプの処理
                             if viz_type == "regression" and analysis_info["statistical_analysis"] == "linear_regression":
