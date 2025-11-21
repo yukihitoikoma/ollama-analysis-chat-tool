@@ -76,9 +76,15 @@ def get_ollama_response(prompt, data_summary):
         # This is a placeholder - in a real implementation, you would use the Ollama API
         # Example: import ollama; response = ollama.generate(model='qwen3:30b', prompt=prompt)
         ollama_host = os.getenv('OLLAMA_HOST', '192.168.0.103:11434')
+        if not ollama_host.startswith(('http://', 'https://')):
+            # スキームがない場合はhttpを追加
+            ollama_url = f"http://{ollama_host}"
+        else:
+            # スキームがある場合はそのまま使用
+            ollama_url = ollama_host
         ollama_model = os.getenv('OLLAMA_MODEL', 'qwen3:30b')
 
-        url = f"http://{ollama_host}/api/generate"
+        url = f"{ollama_url}/api/generate"
 
         # Prepare the prompt
         full_prompt = f"""データの概要:
@@ -315,7 +321,7 @@ def get_ollama_interpretation(prompt):
             # スキームがある場合はそのまま使用
             ollama_url = ollama_host
         ollama_model = os.getenv('OLLAMA_MODEL', 'qwen3:30b')
-        url = f"http://{ollama_host}/api/generate"
+        url = f"{ollama_url}/api/generate"
 
         payload = {
             "model": ollama_model,
